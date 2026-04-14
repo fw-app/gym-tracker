@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-tracker-v2';
+const CACHE_NAME = 'gym-tracker-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -27,8 +27,20 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+// Network first, cache fallback - so bekommst du immer die neueste Version
+// Cache greift nur wenn du offline bist (z.B. im Keller ohne WLAN)
 self.addEventListener('fetch', (e) => {
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    fetch(e.request)
+      .then((response) => {
+        // Erfolgreiche Netzwerk-Antwort -> Cache aktualisieren
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+        return response;
+      })
+      .catch(() => {
+        // Offline -> aus dem Cache liefern
+        return caches.match(e.request);
+      })
   );
 });
