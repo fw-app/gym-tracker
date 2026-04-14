@@ -109,22 +109,30 @@ const App = {
   },
 
   renderExercise(exercise, exerciseIndex, log) {
+    // Letzte Gewichte und PR holen
+    const lastWeights = Storage.getLastWeights(exercise.id);
+    const pr = Storage.getPR(exercise.id);
+
     const sets = [];
     for (let s = 0; s < exercise.sets; s++) {
       const setKey = `${exercise.id}-${s}`;
       const setData = log[setKey] || {};
       const done = setData.done || false;
+      const lastSet = lastWeights?.sets?.[s];
+      const placeholder = lastSet?.weight ? lastSet.weight : 'kg';
+      const repsPlaceholder = lastSet?.reps ? lastSet.reps : `${exercise.repsMin}-${exercise.repsMax}`;
+
       sets.push(`
         <div class="set-row ${done ? 'set-done' : ''}" data-exercise="${exercise.id}" data-set="${s}">
           <span class="set-number">Satz ${s + 1}</span>
           <div class="set-inputs">
             <div class="input-group">
-              <input type="number" class="set-weight" placeholder="kg" step="0.5" min="0"
+              <input type="number" class="set-weight" placeholder="${placeholder}" step="0.5" min="0"
                 value="${setData.weight || ''}" data-key="${setKey}" data-field="weight">
               <span class="input-label">kg</span>
             </div>
             <div class="input-group">
-              <input type="number" class="set-reps" placeholder="${exercise.repsMin}-${exercise.repsMax}" min="0"
+              <input type="number" class="set-reps" placeholder="${repsPlaceholder}" step="1" min="0"
                 value="${setData.reps || ''}" data-key="${setKey}" data-field="reps">
               <span class="input-label">Wdh</span>
             </div>
@@ -136,17 +144,32 @@ const App = {
       `);
     }
 
+    // Last-time und PR Info
+    const lastInfo = lastWeights
+      ? `<span class="last-info">Letztes Mal: ${lastWeights.sets.filter(s => s.weight).map(s => `${s.weight}kg x${s.reps}`).join(', ') || '–'}</span>`
+      : '';
+    const prInfo = pr
+      ? `<span class="pr-info">PR: ${pr.weight}kg x${pr.reps}</span>`
+      : '';
+
     return `
       <div class="exercise-card">
         <div class="exercise-header" data-toggle="ex-${exerciseIndex}">
           <div class="exercise-info">
             <h3>${exercise.name}</h3>
-            <span class="exercise-meta">${exercise.equipment} &middot; ${exercise.sets}x${exercise.repsMin}-${exercise.repsMax}</span>
+            <span class="exercise-meta">${exercise.muscles || exercise.equipment} &middot; ${exercise.sets}x${exercise.repsMin}-${exercise.repsMax}</span>
           </div>
           <span class="exercise-chevron">&#9660;</span>
         </div>
         <div class="exercise-body" id="ex-${exerciseIndex}">
+          ${lastInfo || prInfo ? `<div class="exercise-history">${lastInfo}${prInfo}</div>` : ''}
           ${exercise.notes ? `<p class="exercise-notes">${exercise.notes}</p>` : ''}
+          ${exercise.description ? `
+            <details class="exercise-details">
+              <summary>Anleitung anzeigen</summary>
+              <p class="exercise-description">${exercise.description}</p>
+            </details>
+          ` : ''}
           <div class="sets-container">
             ${sets.join('')}
           </div>
@@ -219,6 +242,15 @@ const App = {
         row.classList.toggle('set-done');
 
         this.updateProgress(workout, log);
+
+        // PR prüfen wenn Satz erledigt
+        if (log[key].done && log[key].weight && log[key].reps) {
+          const exerciseId = key.replace(/-\d+$/, '');
+          const newPR = Storage.checkAndUpdatePR(exerciseId, log[key].weight, log[key].reps);
+          if (newPR) {
+            this.showToast(`Neuer PR! ${newPR.weight}kg x${newPR.reps}`);
+          }
+        }
 
         if (log[key].done && restTime > 0) {
           this.startTimer(restTime);

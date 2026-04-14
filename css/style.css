@@ -193,6 +193,60 @@ body {
   font-style: italic;
 }
 
+/* ===== Exercise History (Last Weights + PR) ===== */
+.exercise-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.last-info {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.pr-info {
+  font-size: 0.72rem;
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.1);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+/* ===== Exercise Details (Anleitung) ===== */
+.exercise-details {
+  margin-bottom: 10px;
+}
+
+.exercise-details summary {
+  font-size: 0.78rem;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+  font-weight: 500;
+}
+
+.exercise-details summary:hover {
+  text-decoration: underline;
+}
+
+.exercise-description {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--primary);
+}
+
 /* ===== Set Rows ===== */
 .set-row {
   display: flex;

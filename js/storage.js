@@ -110,6 +110,61 @@ const Storage = {
     this.set('treadmill-log', log);
   },
 
+  // --- Persönliche Rekorde (PRs) ---
+  getPRs() {
+    return this.get('personal-records', {});
+  },
+
+  // Prüft und aktualisiert PR für eine Übung
+  checkAndUpdatePR(exerciseId, weight, reps) {
+    weight = parseFloat(weight);
+    reps = parseInt(reps);
+    if (!weight || !reps) return null;
+
+    const prs = this.getPRs();
+    const current = prs[exerciseId];
+    const volume = weight * reps; // Einfacher Volumen-Vergleich
+
+    if (!current || volume > current.weight * current.reps) {
+      prs[exerciseId] = {
+        weight, reps, volume,
+        date: new Date().toISOString().slice(0, 10)
+      };
+      this.set('personal-records', prs);
+      return prs[exerciseId]; // Neuer PR!
+    }
+    return null; // Kein neuer PR
+  },
+
+  getPR(exerciseId) {
+    const prs = this.getPRs();
+    return prs[exerciseId] || null;
+  },
+
+  // --- Letzte Gewichte pro Übung ---
+  // Findet das letzte Training mit dieser Übung und gibt die Gewichte zurück
+  getLastWeights(exerciseId) {
+    const history = this.getTrainingHistory();
+    // Rückwärts durch die History, finde den letzten Tag mit dieser Übung
+    for (let i = history.length - 1; i >= 0; i--) {
+      const entry = history[i];
+      if (entry.type === 'rest') continue;
+      const log = this.getWorkoutLog(entry.date);
+      // Prüfe ob diese Übung in dem Log vorkommt
+      const setKeys = Object.keys(log).filter(k => k.startsWith(exerciseId + '-'));
+      if (setKeys.length > 0) {
+        const sets = setKeys.map(k => ({
+          set: parseInt(k.split('-').pop()),
+          weight: log[k].weight || '',
+          reps: log[k].reps || '',
+          done: log[k].done || false
+        })).sort((a, b) => a.set - b.set);
+        return { date: entry.date, sets };
+      }
+    }
+    return null;
+  },
+
   // Export aller Daten als JSON
   exportAll() {
     const data = {};
