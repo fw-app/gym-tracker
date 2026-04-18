@@ -194,13 +194,18 @@ const Profile = {
 
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    // Breite aus Parent-Container lesen, nicht aus Canvas selbst
+    const parent = canvas.parentElement;
+    const parentW = parent.clientWidth - 32; // Abzüglich Padding
+    const parentH = 180;
+    canvas.style.width = parentW + 'px';
+    canvas.style.height = parentH + 'px';
+    canvas.width = parentW * dpr;
+    canvas.height = parentH * dpr;
     ctx.scale(dpr, dpr);
 
-    const w = rect.width;
-    const h = rect.height;
+    const w = parentW;
+    const h = parentH;
     const pad = { top: 20, right: 16, bottom: 30, left: 40 };
     const chartW = w - pad.left - pad.right;
     const chartH = h - pad.top - pad.bottom;

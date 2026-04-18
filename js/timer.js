@@ -1,10 +1,11 @@
-// Rest-Timer mit Countdown, Vibration und Sound
+// Rest-Timer mit Countdown, Vibration, Sound und Wake Lock
 
 const Timer = {
   interval: null,
   remaining: 0,
   total: 0,
   callback: null,
+  wakeLock: null,
 
   start(seconds, onTick, onDone) {
     this.stop();
@@ -12,6 +13,7 @@ const Timer = {
     this.total = seconds;
     this.callback = onDone;
 
+    this.requestWakeLock();
     onTick(this.remaining, this.total);
 
     this.interval = setInterval(() => {
@@ -32,10 +34,32 @@ const Timer = {
       this.interval = null;
     }
     this.remaining = 0;
+    this.releaseWakeLock();
   },
 
   isRunning() {
     return this.interval !== null;
+  },
+
+  // Wake Lock: Bildschirm bleibt an während Timer läuft
+  async requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        this.wakeLock = await navigator.wakeLock.request('screen');
+        this.wakeLock.addEventListener('release', () => {
+          this.wakeLock = null;
+        });
+      }
+    } catch {
+      // Wake Lock nicht verfügbar oder verweigert
+    }
+  },
+
+  releaseWakeLock() {
+    if (this.wakeLock) {
+      this.wakeLock.release();
+      this.wakeLock = null;
+    }
   },
 
   notify() {
@@ -55,7 +79,7 @@ const Timer = {
       osc.start();
       osc.stop(ctx.currentTime + 0.3);
     } catch {
-      // Audio nicht verfügbar - kein Problem
+      // Audio nicht verfügbar
     }
   },
 

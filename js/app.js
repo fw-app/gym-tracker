@@ -1,18 +1,17 @@
 // Haupt-App-Logik & Navigation
 
 const App = {
-  currentView: 'today',
+  currentView: 'training',
   selectedDate: null,
+  activeTrainingDay: null, // manuell gewählter Tag (null = aktueller)
 
   init() {
     this.selectedDate = new Date().toISOString().slice(0, 10);
 
-    // Service Worker registrieren
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
 
-    // Navigation
     document.querySelectorAll('.nav-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -21,50 +20,37 @@ const App = {
       });
     });
 
-    this.navigate('today');
+    this.navigate('training');
   },
 
   navigate(view) {
     this.currentView = view;
     switch (view) {
-      case 'today': this.showToday(); break;
+      case 'training': this.showTraining(); break;
       case 'plan': this.showPlan(); break;
       case 'profile': Profile.show(); break;
     }
   },
 
-  // --- HEUTE: Aktueller Trainingstag ---
-  showToday() {
+  // --- TRAINING: Aktuelles/gewähltes Training ---
+  showTraining(overrideDayIndex) {
     const content = document.getElementById('content');
-    const dayIndex = Storage.getCurrentTrainingDay();
+    const dayIndex = overrideDayIndex !== undefined ? overrideDayIndex : Storage.getCurrentTrainingDay();
+    this.activeTrainingDay = dayIndex;
     const dayInfo = TRAINING_PLAN.rotation[dayIndex];
     const workout = getWorkoutByType(dayInfo.type);
     const dateStr = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
-    const todayTraining = Storage.getTodayTraining();
 
-    // Falls heute schon ein Training abgeschlossen wurde
-    if (todayTraining) {
-      const completedWorkout = getWorkoutByType(todayTraining.type);
-      const completedInfo = TRAINING_PLAN.rotation[todayTraining.dayIndex];
-      content.innerHTML = `
-        <div class="rest-day">
-          <div class="completed-badge">&#10003;</div>
-          <h2>Training erledigt!</h2>
-          <p class="completed-workout">${completedInfo.icon} ${completedInfo.label}</p>
-          <p>${dateStr}</p>
-          <p class="text-muted" style="margin-top:16px">Nächstes Training: <strong>${dayInfo.icon} ${dayInfo.label}</strong></p>
-          <p class="text-muted">Vergiss das Laufband nicht! ~60 Min / 8000 Schritte</p>
-        </div>
-      `;
-      return;
-    }
-
-    const log = Storage.getWorkoutLog(this.selectedDate);
+    const log = Storage.getWorkoutLog(this.selectedDate + '-' + dayInfo.type);
 
     content.innerHTML = `
       <div class="workout-header">
         <div class="workout-date">${dateStr}</div>
-        <div class="training-day-badge">Tag ${dayIndex + 1} von 6</div>
+        <div class="training-day-selector">
+          <button class="day-nav-btn" id="prev-day">&#9664;</button>
+          <div class="training-day-badge" id="day-badge">Tag ${dayIndex + 1} von 6</div>
+          <button class="day-nav-btn" id="next-day">&#9654;</button>
+        </div>
         <h2>${dayInfo.icon} ${workout.name}</h2>
         <div class="workout-progress">
           <div class="progress-bar">
@@ -84,80 +70,112 @@ const App = {
     `;
 
     this.updateProgress(workout, log);
-    this.attachExerciseListeners(workout);
+    this.attachExerciseListeners(workout, dayInfo.type);
+
+    // Tag-Navigation (Links/Rechts)
+    document.getElementById('prev-day').addEventListener('click', () => {
+      const prev = (dayIndex - 1 + 6) % 6;
+      this.showTraining(prev);
+    });
+    document.getElementById('next-day').addEventListener('click', () => {
+      const next = (dayIndex + 1) % 6;
+      this.showTraining(next);
+    });
 
     // Training abschließen
     document.getElementById('finish-workout-btn').addEventListener('click', () => {
-      const log = Storage.getWorkoutLog(this.selectedDate);
+      const logKey = this.selectedDate + '-' + dayInfo.type;
+      const log = Storage.getWorkoutLog(logKey);
       const done = Object.values(log).filter(s => s.done).length;
       if (done === 0) {
         this.showToast('Mach mindestens einen Satz!');
         return;
       }
       Storage.addTrainingToHistory(this.selectedDate, dayInfo.type, dayIndex);
-      Storage.advanceTrainingDay();
-      this.showToast('Training gespeichert! Weiter geht\'s.');
-      this.showToday();
+      // Nächsten Tag setzen
+      Storage.setCurrentTrainingDay((dayIndex + 1) % 6);
+      this.showToast('Training gespeichert!');
+      this.showTrainingDone(dayInfo, dayIndex);
     });
 
-    // Ruhetag / überspringen (Tag bleibt gleich)
+    // Ruhetag
     document.getElementById('skip-day-btn').addEventListener('click', () => {
-      Storage.addTrainingToHistory(this.selectedDate, 'rest', dayIndex);
-      this.showToast('Ruhetag eingetragen. Morgen geht\'s weiter!');
-      this.showToday();
+      this.showToast('Ruhetag. Vergiss das Laufband nicht!');
+      this.showTrainingDone(dayInfo, dayIndex, true);
     });
   },
 
+  showTrainingDone(dayInfo, dayIndex, isRest) {
+    const content = document.getElementById('content');
+    const nextIndex = Storage.getCurrentTrainingDay();
+    const nextInfo = TRAINING_PLAN.rotation[nextIndex];
+    const dateStr = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+
+    content.innerHTML = `
+      <div class="rest-day">
+        <div class="completed-badge">${isRest ? '🚶' : '&#10003;'}</div>
+        <h2>${isRest ? 'Ruhetag' : 'Training erledigt!'}</h2>
+        <p class="completed-workout">${dayInfo.icon} ${dayInfo.label}</p>
+        <p>${dateStr}</p>
+        <p class="text-muted" style="margin-top:16px">Vergiss das Laufband nicht! ~60 Min / 8000 Schritte</p>
+        <button class="btn btn-primary" id="start-next-btn" style="margin-top:24px">
+          ${nextInfo.icon} ${nextInfo.label} starten
+        </button>
+        <button class="btn btn-outline" id="back-to-plan-btn" style="margin-top:8px">
+          Zum Trainingsplan
+        </button>
+      </div>
+    `;
+
+    document.getElementById('start-next-btn').addEventListener('click', () => {
+      this.showTraining(nextIndex);
+    });
+    document.getElementById('back-to-plan-btn').addEventListener('click', () => {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('[data-view="plan"]').classList.add('active');
+      this.navigate('plan');
+    });
+  },
+
+  // --- NEUES SET-UI: Ein Gewicht/Reps-Feld + Satz-Buttons ---
   renderExercise(exercise, exerciseIndex, log) {
-    // Letzte Gewichte und PR holen
     const lastWeights = Storage.getLastWeights(exercise.id);
     const pr = Storage.getPR(exercise.id);
 
-    const sets = [];
+    // Standardwerte: letztes Training oder leer
+    const defaultWeight = lastWeights?.sets?.[0]?.weight || '';
+    const defaultReps = lastWeights?.sets?.[0]?.reps || '';
+
+    // Satz-Buttons
+    const setButtons = [];
+    let allDone = true;
     for (let s = 0; s < exercise.sets; s++) {
       const setKey = `${exercise.id}-${s}`;
       const setData = log[setKey] || {};
       const done = setData.done || false;
-      const lastSet = lastWeights?.sets?.[s];
-      const placeholder = lastSet?.weight ? lastSet.weight : 'kg';
-      const repsPlaceholder = lastSet?.reps ? lastSet.reps : `${exercise.repsMin}-${exercise.repsMax}`;
-
-      sets.push(`
-        <div class="set-row ${done ? 'set-done' : ''}" data-exercise="${exercise.id}" data-set="${s}">
-          <span class="set-number">Satz ${s + 1}</span>
-          <div class="set-inputs">
-            <div class="input-group">
-              <input type="number" class="set-weight" placeholder="${placeholder}" step="0.5" min="0"
-                value="${setData.weight || ''}" data-key="${setKey}" data-field="weight">
-              <span class="input-label">kg</span>
-            </div>
-            <div class="input-group">
-              <input type="number" class="set-reps" placeholder="${repsPlaceholder}" step="1" min="0"
-                value="${setData.reps || ''}" data-key="${setKey}" data-field="reps">
-              <span class="input-label">Wdh</span>
-            </div>
-          </div>
-          <button class="btn-check ${done ? 'checked' : ''}" data-key="${setKey}" data-rest="${exercise.rest}">
-            ${done ? '&#10003;' : ''}
-          </button>
-        </div>
+      if (!done) allDone = false;
+      const label = done ? `${setData.weight || '?'}kg×${setData.reps || '?'}` : '';
+      setButtons.push(`
+        <button class="set-btn ${done ? 'set-btn-done' : ''}" data-key="${setKey}" data-set="${s}" data-rest="${exercise.rest}" data-exercise-id="${exercise.id}">
+          <span class="set-btn-number">${s + 1}</span>
+          ${done ? `<span class="set-btn-detail">${label}</span>` : ''}
+        </button>
       `);
     }
 
-    // Last-time und PR Info
     const lastInfo = lastWeights
-      ? `<span class="last-info">Letztes Mal: ${lastWeights.sets.filter(s => s.weight).map(s => `${s.weight}kg x${s.reps}`).join(', ') || '–'}</span>`
+      ? `<span class="last-info">Letztes Mal: ${lastWeights.sets.filter(s => s.weight).map(s => `${s.weight}kg×${s.reps}`).slice(0, 3).join(', ') || '–'}</span>`
       : '';
     const prInfo = pr
-      ? `<span class="pr-info">PR: ${pr.weight}kg x${pr.reps}</span>`
+      ? `<span class="pr-info">PR: ${pr.weight}kg×${pr.reps}</span>`
       : '';
 
     return `
-      <div class="exercise-card">
+      <div class="exercise-card ${allDone ? 'exercise-done' : ''}">
         <div class="exercise-header" data-toggle="ex-${exerciseIndex}">
           <div class="exercise-info">
             <h3>${exercise.name}</h3>
-            <span class="exercise-meta">${exercise.muscles || exercise.equipment} &middot; ${exercise.sets}x${exercise.repsMin}-${exercise.repsMax}</span>
+            <span class="exercise-meta">${exercise.muscles || exercise.equipment} · ${exercise.sets}×${exercise.repsMin}-${exercise.repsMax}</span>
           </div>
           <span class="exercise-chevron">&#9660;</span>
         </div>
@@ -170,8 +188,22 @@ const App = {
               <p class="exercise-description">${exercise.description}</p>
             </details>
           ` : ''}
-          <div class="sets-container">
-            ${sets.join('')}
+          <div class="set-input-area" data-exercise-id="${exercise.id}">
+            <div class="set-input-row">
+              <div class="input-group">
+                <input type="number" class="shared-weight" placeholder="${defaultWeight || 'kg'}" step="0.5" min="0"
+                  value="${defaultWeight}" data-exercise-id="${exercise.id}">
+                <span class="input-label">kg</span>
+              </div>
+              <div class="input-group">
+                <input type="number" class="shared-reps" placeholder="${defaultReps || exercise.repsMin + '-' + exercise.repsMax}" step="1" min="0"
+                  value="${defaultReps}" data-exercise-id="${exercise.id}">
+                <span class="input-label">Wdh</span>
+              </div>
+            </div>
+            <div class="set-buttons-row">
+              ${setButtons.join('')}
+            </div>
           </div>
         </div>
       </div>
@@ -199,7 +231,9 @@ const App = {
     `;
   },
 
-  attachExerciseListeners(workout) {
+  attachExerciseListeners(workout, workoutType) {
+    const logKey = this.selectedDate + '-' + workoutType;
+
     // Übung auf-/zuklappen
     document.querySelectorAll('.exercise-header').forEach(header => {
       header.addEventListener('click', () => {
@@ -209,50 +243,73 @@ const App = {
       });
     });
 
-    // Gewicht/Reps speichern
-    document.querySelectorAll('.set-weight, .set-reps').forEach(input => {
-      input.addEventListener('change', () => {
-        const log = Storage.getWorkoutLog(this.selectedDate);
-        const key = input.dataset.key;
-        if (!log[key]) log[key] = {};
-        log[key][input.dataset.field] = input.value;
-        Storage.saveWorkoutLog(this.selectedDate, log);
-      });
-    });
-
-    // Satz abhaken
-    document.querySelectorAll('.btn-check').forEach(btn => {
+    // Satz-Buttons: Klick markiert Satz als erledigt mit den Werten aus dem shared Input
+    document.querySelectorAll('.set-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const key = btn.dataset.key;
+        const setIndex = parseInt(btn.dataset.set);
         const restTime = parseInt(btn.dataset.rest) || 90;
-        const log = Storage.getWorkoutLog(this.selectedDate);
+        const exerciseId = btn.dataset.exerciseId;
+
+        // Shared Inputs für diese Übung finden
+        const area = btn.closest('.set-input-area');
+        const weightInput = area.querySelector('.shared-weight');
+        const repsInput = area.querySelector('.shared-reps');
+        const weight = weightInput.value;
+        const reps = repsInput.value;
+
+        if (!weight || !reps) {
+          this.showToast('Gewicht und Wdh eingeben!');
+          return;
+        }
+
+        const log = Storage.getWorkoutLog(logKey);
         if (!log[key]) log[key] = {};
-        log[key].done = !log[key].done;
 
-        const row = btn.closest('.set-row');
-        const weightInput = row.querySelector('.set-weight');
-        const repsInput = row.querySelector('.set-reps');
-        if (weightInput.value) log[key].weight = weightInput.value;
-        if (repsInput.value) log[key].reps = repsInput.value;
+        // Toggle: Wenn schon erledigt, rückgängig machen
+        if (log[key].done) {
+          log[key].done = false;
+          btn.classList.remove('set-btn-done');
+          btn.querySelector('.set-btn-detail')?.remove();
+          Storage.saveWorkoutLog(logKey, log);
+          this.updateProgress(workout, log);
+          return;
+        }
 
-        Storage.saveWorkoutLog(this.selectedDate, log);
+        // Satz als erledigt markieren
+        log[key].done = true;
+        log[key].weight = weight;
+        log[key].reps = reps;
+        Storage.saveWorkoutLog(logKey, log);
 
-        btn.classList.toggle('checked');
-        btn.innerHTML = log[key].done ? '&#10003;' : '';
-        row.classList.toggle('set-done');
+        // UI Update
+        btn.classList.add('set-btn-done');
+        const existingDetail = btn.querySelector('.set-btn-detail');
+        if (existingDetail) {
+          existingDetail.textContent = `${weight}kg×${reps}`;
+        } else {
+          const detail = document.createElement('span');
+          detail.className = 'set-btn-detail';
+          detail.textContent = `${weight}kg×${reps}`;
+          btn.appendChild(detail);
+        }
 
         this.updateProgress(workout, log);
 
-        // PR prüfen wenn Satz erledigt
-        if (log[key].done && log[key].weight && log[key].reps) {
-          const exerciseId = key.replace(/-\d+$/, '');
-          const newPR = Storage.checkAndUpdatePR(exerciseId, log[key].weight, log[key].reps);
-          if (newPR) {
-            this.showToast(`Neuer PR! ${newPR.weight}kg x${newPR.reps}`);
-          }
+        // PR prüfen
+        const newPR = Storage.checkAndUpdatePR(exerciseId, weight, reps);
+        if (newPR) {
+          this.showToast(`Neuer PR! ${newPR.weight}kg×${newPR.reps}`);
         }
 
-        if (log[key].done && restTime > 0) {
+        // Prüfe ob alle Sätze der Übung erledigt
+        const card = btn.closest('.exercise-card');
+        const allBtns = card.querySelectorAll('.set-btn');
+        const allDone = Array.from(allBtns).every(b => b.classList.contains('set-btn-done'));
+        if (allDone) card.classList.add('exercise-done');
+
+        // Timer starten
+        if (restTime > 0) {
           this.startTimer(restTime);
         }
       });
@@ -306,13 +363,12 @@ const App = {
     if (text) text.textContent = `${done}/${total} Sätze`;
   },
 
-  // --- PLAN: Übersicht der 6 Trainingstage ---
+  // --- PLAN: Interaktive Übersicht ---
   showPlan() {
     const content = document.getElementById('content');
     const currentDay = Storage.getCurrentTrainingDay();
     const history = Storage.getTrainingHistory();
 
-    // Letzte Trainings pro Typ finden
     const lastByType = {};
     history.forEach(h => {
       if (h.type !== 'rest') {
@@ -320,21 +376,28 @@ const App = {
       }
     });
 
-    // Aktuelle Zyklusnummer berechnen
     const completedCycles = Math.floor(history.filter(h => h.type !== 'rest').length / 6);
-    const inCycle = history.filter(h => h.type !== 'rest').length % 6;
+    const totalWorkouts = history.filter(h => h.type !== 'rest').length;
+    const last7 = history.filter(h => {
+      const d = new Date(h.date);
+      const week = new Date();
+      week.setDate(week.getDate() - 7);
+      return d >= week && h.type !== 'rest';
+    }).length;
 
     const days = TRAINING_PLAN.rotation.map((day, i) => {
       const isCurrent = i === currentDay;
-      const isDone = i < currentDay || (inCycle > i);
       const lastDate = lastByType[day.type];
       const lastStr = lastDate
         ? new Date(lastDate).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
         : 'Noch nie';
 
       return `
-        <div class="plan-day ${isCurrent ? 'plan-day-current' : ''} ${isDone && !isCurrent ? 'plan-day-done' : ''}">
-          <div class="plan-day-number">Tag ${i + 1}</div>
+        <div class="plan-day ${isCurrent ? 'plan-day-current' : ''}" data-day-index="${i}">
+          <div class="plan-day-top">
+            <div class="plan-day-number">Tag ${i + 1}</div>
+            ${isCurrent ? '<div class="plan-day-badge">Aktuell</div>' : ''}
+          </div>
           <div class="plan-day-main">
             <span class="plan-day-icon">${day.icon}</span>
             <div class="plan-day-info">
@@ -342,21 +405,13 @@ const App = {
               <div class="plan-day-subtitle">${day.subtitle}</div>
             </div>
           </div>
-          <div class="plan-day-last">Zuletzt: ${lastStr}</div>
-          ${isCurrent ? '<div class="plan-day-badge">Nächstes Training</div>' : ''}
+          <div class="plan-day-bottom">
+            <span class="plan-day-last">Zuletzt: ${lastStr}</span>
+            <button class="btn-start-day" data-day="${i}">Starten</button>
+          </div>
         </div>
       `;
     }).join('');
-
-    // Trainings-Statistiken
-    const totalWorkouts = history.filter(h => h.type !== 'rest').length;
-    const restDays = history.filter(h => h.type === 'rest').length;
-    const last7 = history.filter(h => {
-      const d = new Date(h.date);
-      const week = new Date();
-      week.setDate(week.getDate() - 7);
-      return d >= week && h.type !== 'rest';
-    }).length;
 
     content.innerHTML = `
       <div class="plan-view">
@@ -368,14 +423,14 @@ const App = {
           </div>
           <div class="stat-card">
             <div class="stat-number">${completedCycles}</div>
-            <div class="stat-label">Zyklen abgeschlossen</div>
+            <div class="stat-label">Zyklen</div>
           </div>
           <div class="stat-card">
             <div class="stat-number">${last7}</div>
             <div class="stat-label">Diese Woche</div>
           </div>
         </div>
-        <h3 class="plan-section-title">Aktueller Zyklus</h3>
+        <h3 class="plan-section-title">Trainingstage</h3>
         <div class="plan-grid">${days}</div>
         <div class="week-legend">
           <h3>Trainings-Tipps</h3>
@@ -389,6 +444,19 @@ const App = {
         </div>
       </div>
     `;
+
+    // Klick auf "Starten" Button
+    document.querySelectorAll('.btn-start-day').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dayIdx = parseInt(btn.dataset.day);
+        Storage.setCurrentTrainingDay(dayIdx);
+        // Zum Training-Tab wechseln
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-view="training"]').classList.add('active');
+        this.showTraining(dayIdx);
+      });
+    });
   },
 
   showToast(message) {
